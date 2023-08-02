@@ -1,0 +1,12 @@
+# requirements.
+tifffile
+numpy
+pillow
+multiprocess
+pandas
+pyarrow
+matplotlib
+scikit-image
+scipy
+seaborn
+opencv
