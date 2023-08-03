@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os, cv2, multiprocessing, time, sys, random, math
+import os, cv2, multiprocessing, time, sys, random, math, json
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -9,6 +9,10 @@ from scipy.ndimage import median_filter
 from skimage import exposure
 import pandas as pd
 import scipy.optimize
+
+# Some images are rather large. Therefore, the limit has to be extended:
+# https://stackoverflow.com/questions/60963452/remove-opencv-image-size-limitation
+os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = pow(2,40).__str__()
 
 # import other libaries by kleinerELM
 home_dir = os.path.dirname(os.path.realpath(__file__))
@@ -22,6 +26,28 @@ else:
     print( 'missing ' + ts_path + ts_file + '.py!' )
     print( 'download from https://github.com/kleinerELM/tiff_scaling' )
     sys.exit()
+
+def load_known_file( specimen, age, image_id = 0 ):
+	with open("known_datasets.json") as known_datasets:
+		content = known_datasets.read()
+	files = json.loads(content)
+	age = str(age)
+	image_entries = len( files[specimen]['data'][age] )
+	if image_entries < image_id:
+		raise SystemExit( 'Only {} image(s) are known for {} {}d.'.format( image_entries, specimen, age) )
+	else:
+		file_path = home_dir + os.sep + specimen + os.sep + '{}d'.format(age) + os.sep + files[specimen]['data'][age][image_id]['name']
+		if not os.path.isfile( file_path ):
+			raise SystemExit( 'Image "{}" does not exist.'.format( files[specimen]['data'][age][image_id]['name'] ) )
+		else:
+			return {
+				'file_path'	  : file_path,
+				't_pores'	  : files[specimen]['data'][age][image_id]['t_pores'],
+				't_clinker'	  : files[specimen]['data'][age][image_id]['t_clinker'],
+				'label'		  : '{}, {}d hydration'.format(files[specimen]['label'], age),
+				'label_short' : files[specimen]['label'],
+				'min_rim'     : files[specimen]['data'][age][image_id]['min_rim'],
+			}
 
 def get_random_image_crop( shape, scaling, w_crop, h_crop = 0):
     """
@@ -456,7 +482,7 @@ class Image_Processor:
                     'label'               : 'unnamed',
                     'age'                 : '0 d',
                     't_pores'             : 100,
-                    't_alite'             : 200,
+                    't_clinker'           : 200,
                     'min_grain_dia'       : 0.35,  # diameter in µm #int(   1000/2.9) #0.4µm²
                     'max_grain_dia'       : 3.00,  # diameter in µm #int(  50000/2.9) #
                     'min_circularity'     : 0.60,  # 0.0-1.0, where 1.0 is a perfect circle
@@ -538,7 +564,7 @@ class Image_Processor:
         self.min_grain_area = int( math.pi * ((self.min_grain_dia/2)**2) )
         self.max_grain_area = int( math.pi * ((self.max_grain_dia/2)**2) )
 
-        print( "\n - Selected color thresholds: 0-{:d} for pores {:d}-{:d} for hydrates and {:d}-255 for alite".format(self.settings['t_pores'], self.settings['t_pores']+1, self.settings['t_alite']-1, self.settings['t_alite'])  )
+        print( "\n - Selected color thresholds: 0-{:d} for pores {:d}-{:d} for hydrates and {:d}-255 for alite".format(self.settings['t_pores'], self.settings['t_pores']+1, self.settings['t_clinker']-1, self.settings['t_clinker'])  )
 
         print( " - Analyzing gains with areas from {:.3f} {}² up to {:.2f} {}²".format(self.min_grain_area*(self.scaling['x']**2), self.unit, self.max_grain_area*(self.scaling['x']**2), self.unit) )
 
@@ -608,23 +634,23 @@ class Image_Processor:
 
         # get pores / alite masks
         _, thresh_pores = cv2.threshold(self.filtered, self.settings["t_pores"], 255, cv2.THRESH_BINARY_INV)
-        _, thresh_alite = cv2.threshold(self.filtered, self.settings["t_alite"], 255, cv2.THRESH_BINARY)
+        _, thresh_clinker = cv2.threshold(self.filtered, self.settings["t_clinker"], 255, cv2.THRESH_BINARY)
 
         # fill holes in alite mask
         bench_time = time.time()
-        self.unfiltered_contours, _ = cv2.findContours(thresh_alite, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        thresh_alite = np.zeros((thresh_pores.shape[0], thresh_pores.shape[1]), np.uint8)
+        self.unfiltered_contours, _ = cv2.findContours(thresh_clinker, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        thresh_clinker = np.zeros((thresh_pores.shape[0], thresh_pores.shape[1]), np.uint8)
 
         # draw the contours on an empty canvas and fill the contours
         contour_cnt = len(self.unfiltered_contours)
         for i in range(contour_cnt):
             if i%int(contour_cnt/20) == 0 and i > 0: print( '{:3.0f}% done'.format( i/len(self.unfiltered_contours)*100 ))
-            thresh_alite = cv2.drawContours(thresh_alite, self.unfiltered_contours, i, (255), -1)
-        self.unfiltered_contours, self.unfiltered_hierarchy = cv2.findContours(thresh_alite, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            thresh_clinker = cv2.drawContours(thresh_clinker, self.unfiltered_contours, i, (255), -1)
+        self.unfiltered_contours, self.unfiltered_hierarchy = cv2.findContours(thresh_clinker, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         print( "fill holes took {:.0f} s".format(time.time() - bench_time) )
 
         # hydrates
-        thresh_hydrates = ((thresh_pores+thresh_alite)-255)*255
+        thresh_hydrates = ((thresh_pores+thresh_clinker)-255)*255
 
         # combine to 3 phase rgb image
         self.thresh_rgb = np.ones((thresh_pores.shape[0],thresh_pores.shape[1],3), np.uint8)
@@ -632,7 +658,7 @@ class Image_Processor:
         #define colors for the phase map (maximum 3)
         self.thresh_rgb[:,:,0] = thresh_pores
         self.thresh_rgb[:,:,1] = thresh_hydrates
-        self.thresh_rgb[:,:,2] = thresh_alite
+        self.thresh_rgb[:,:,2] = thresh_clinker
 
         self.multiplied_img = cv2.addWeighted( cv2.cvtColor(self.filtered, cv2.COLOR_GRAY2RGB), 0.85, self.thresh_rgb, 0.15, 0.0)
 
@@ -1026,7 +1052,7 @@ class Image_Processor:
         ax[i].set_ylabel( "frequency" )
         height = self.w * self.h
         ax[i].axvline(self.settings["t_pores"], 0, height, color='red')
-        ax[i].axvline(self.settings["t_alite"], 0, height, color='green')
+        ax[i].axvline(self.settings["t_clinker"], 0, height, color='green')
 
         if save: plt.savefig(self.file_dir + os.sep + self.file_name + "_filtered-histogram.png")
 
@@ -1057,8 +1083,8 @@ class Image_Processor:
         i += 1
         ravel = self.filtered.ravel()
         ax[i].hist(ravel, self.settings["t_pores"], [0, self.settings["t_pores"]], color=self.c_rgba_pores)
-        ax[i].hist(ravel, self.settings["t_alite"]-self.settings["t_pores"], [self.settings["t_pores"],self.settings["t_alite"]], color=self.c_rgba_hydrates)
-        ax[i].hist(ravel, 256-self.settings["t_alite"], [self.settings["t_alite"], 256], color=self.c_rgba_alite)
+        ax[i].hist(ravel, self.settings["t_clinker"]-self.settings["t_pores"], [self.settings["t_pores"],self.settings["t_clinker"]], color=self.c_rgba_hydrates)
+        ax[i].hist(ravel, 256-self.settings["t_clinker"], [self.settings["t_clinker"], 256], color=self.c_rgba_alite)
         #ax.hist(filtered.ravel(),256,[0,256])
         ax[i].set_title(  "Histogram of denoised and equalized image" )
         ax[i].set_xlim([0,256])
@@ -1066,7 +1092,7 @@ class Image_Processor:
         ax[i].set_ylabel( "frequency"  )
         height = self.w * self.h
         ax[i].axvline(self.settings["t_pores"], 0, height, color='red')
-        ax[i].axvline(self.settings["t_alite"], 0, height, color='green')
+        ax[i].axvline(self.settings["t_clinker"], 0, height, color='green')
 
         if save: plt.savefig(self.file_dir + os.sep + self.file_name + "_thresholds.png")
 
