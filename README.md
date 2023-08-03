@@ -1,19 +1,20 @@
 # Measure hydrate layer
 
 A python script to measure the thickness of the C-S-H layer around alite (C<sub>3</sub>S) or belite (C<sub>2</sub>S) particles.
-This script is part of the paper _"A python tool to determine the thickness of the hydrate layer around clinker grains using SEM-BSE images."_, published for the 19<sup>th</sup> Euroseminar on Microscopy Applied to Building Materials 2024.
+This script is part of the paper __"A python tool to determine the thickness of the hydrate layer around clinker grains using SEM-BSE images."__, (to be) published for the _19<sup>th</sup> Euroseminar on Microscopy Applied to Building Materials 2024_.
 
-Open the Jupyter notebook
+Open the Jupyter notebook `cement_hydrate_fringe_C3S 7d-example.ipynb` to see an exaple on how to process the datasets.
+The notebook `final_evaluation_C3S.ipynb` includes some postprocessing/evaluation of the preprocessed datasets.
 
 ## datasets
 
-The datasets processed using this script and described in this paper are available at Zenodo:
+The datasets processed using this script and mentioned in the corresponding paper are available at Zenodo:
  - C<sub>3</sub>S (1,7,14, 28, 84, and 365 days)
    [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.8118931.svg)](https://doi.org/10.5281/zenodo.8118931)
  - C<sub>2</sub>S (14, 28, 84, and 365 days)
    [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.8119086.svg)](https://doi.org/10.5281/zenodo.8119086)
 
-The datasets should be put in the following folder structure:
+The datasets should be saved in the following folder structure:
 
 ```
 [tiff_scaling]
