@@ -1,2 +1,2 @@
-,specimen,age,label,t_pores,t_clinker,enhance_hist,denoise,denoising_algorithm,min_grain_dia,max_grain_dia,min_circularity,max_rim,min_rim,reduce,file_path,w_px,h_px,unit,s_x,s_y
-0,C3S,7,"C$_{3}}$S, 7d hydration",103,185,True,True,nlm,0.3,15.0,0.1,9.0,0.4,True,D:\GIT\measure_hydrate_layer\C3S\7d\7d_example.tif,2929,2929,µm,0.08093889113719142,0.08093889113719142
+,specimen,age,label,t_pores,t_clinker,enhance_hist,denoise,denoising_algorithm,min_grain_dia,max_grain_dia,min_circularity,max_rim,min_rim,reduce,file_path,w_px,h_px,unit,s_x,s_y,segmentation_folder
+1,C3S,7,"C$_{3}}$S, 7d hydration",103,185,True,True,nlm,0.3,15.0,0.1,9.0,0.4,False,D:\GIT\measure_hydrate_layer\C3S\7d\7d_example.tif,2929,2929,µm,0.08093889113719142,0.08093889113719142,

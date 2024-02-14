@@ -108,7 +108,7 @@ def denoiseNLMCV2( image, h=15, templateWindowSize=7, searchWindowSize=23 ):
 
 class FitCurveProfile:
     fit_funktion_TeX = r'a \cdot e^{-0.5 \cdot (\frac{log(x-d)-b}{c})^2}'
-    parameter_string = "a = {:.3f},\nb = {:.3f},\nc = {:.3f},\nd = {:.3f}"
+    parameter_string = "a = {:.3f}±{:.3f},\nb = {:.3f}±{:.3f},\nc = {:.3f}±{:.3f},\nd = {:.3f}±{:.3f}"
     f_data           = []
     fx_data          = []
     min_x            = 0
@@ -159,7 +159,8 @@ class FitCurveProfile:
         if bounds == None:
             bounds = ((-5, -10, 0.001, -1), (5, 10, 10, .99*self.min_x) )
         self.params, self.cv = scipy.optimize.curve_fit(self.fit_function_exp, self.x_data, self.y_data, p0, bounds=bounds, maxfev=10000)
-        self.parameter_string = self.parameter_string.format(self.params[0], self.params[1], self.params[2], self.params[3])
+        self.perr = np.sqrt(np.diag(self.cv))
+        self.parameter_string = self.parameter_string.format(self.params[0], self.perr[0], self.params[1], self.perr[1], self.params[2], self.perr[2], self.params[3], self.perr[3])
 
     def get_f_data(self):
         if len(self.f_data) == 0:
@@ -186,7 +187,7 @@ class FitCurveProfile:
         ax.legend()
         plt.show()
 
-def process_particle( k, particle_raw, particle_rgb, c_rgb_alite, c_rgb_pores, scaling = 1.0, show_image = True, save_image = True, border_range = 2 ):
+def process_particle( k, particle_raw, particle_rgb, c_rgb_alite, c_rgb_pores, scaling = 1.0, show_image = True, save_image = True, border_range = 2, show_ignored = False ):
     """
     The main function to process the size of the hydration fringe.
 
@@ -214,7 +215,7 @@ def process_particle( k, particle_raw, particle_rgb, c_rgb_alite, c_rgb_pores, s
     df_hydrate_fringes = pd.DataFrame([], columns = df_hydrate_fringes_columns)
     polar_raw = particle_raw
     polar     = []
-    unploar   = []
+    unpolar   = []
     z         = 1
 
     # the particle image should be square
@@ -280,51 +281,86 @@ def process_particle( k, particle_raw, particle_rgb, c_rgb_alite, c_rgb_pores, s
 
         df_hydrate_fringes = pd.DataFrame(df_hydrate_fringes_list,columns=df_hydrate_fringes_columns)
 
-        if show_image or save_image:
+        if True: # show_image or save_image:
             # color definitions for the image
-            c_ignore      = (100,100,100)
             c_stop        = (  0,  0,  0)
-            c_ignore_hydr = (100,150,100)
+            if show_ignored:
+                c_ignore      = (100,100,100)
+                c_ignore_hydr = (100,150,100)
 
             # re-color the images
             for i, r in df_hydrate_fringes.iterrows():
-                if r['boundary'] < 0:
+                if r['boundary'] < 0 and show_ignored: # ignored area
                     polar[i][r['h_stop']:u] = c_ignore_hydr if r['h_start'] == r['h_stop'] else c_ignore
-                if r['boundary'] == 0: polar[i][r['h_stop']:u] = c_stop
-                elif r['boundary'] > 0:
+                elif r['boundary'] > 0 and show_ignored:
                     for l in range(1,border_range+1):
                         if r['boundary'] == l:
                             d = int(100/(border_range+1))*(l)
                             polar[i][r['h_start']:r['h_stop']] = (c_ignore_hydr[0]-d, c_ignore_hydr[1]-d, c_ignore_hydr[2]-d)
                             polar[i][r['h_stop'] :u] = c_ignore
 
+                #elif r['boundary'] == 0:
+                else:
+                    if r['boundary'] != 0:
+                        polar[i][r['h_start']:u] = c_stop
+                    else:
+                        polar[i][r['h_stop']:u] = c_stop
+
+
+            # re-transform the final polar image
+            unpolar = cv2.warpPolar(polar, (z,z), (u,u), u, cv2.WARP_INVERSE_MAP, cv2.WARP_FILL_OUTLIERS)
+
         # remove all measurements close to a boundary, with a zero-measurement and reset the index
         df_hydrate_fringes = df_hydrate_fringes[(df_hydrate_fringes.len_px != 0) & (df_hydrate_fringes['boundary'] == 0)].reset_index()
         df_hydrate_fringes['len'] = df_hydrate_fringes['len_px'].apply( lambda x: x*scaling )
 
-        # re-transform the final polar image
-        unploar = cv2.warpPolar(polar, (z,z),(u,u), u, cv2.WARP_INVERSE_MAP)
-
     len_df_hf = len(df_hydrate_fringes)
     show_image = show_image if len(polar) > 0 else False
-    return {'id':                 k,
-            'df_hydrate_fringes': df_hydrate_fringes,
-            'measurements':       len_df_hf,
-            #'len_min':            df_hydrate_fringes['len'].min(),
-            #'len_max':            df_hydrate_fringes['len'].max(),
-            'len_mean':           df_hydrate_fringes['len'].mean(),
-            'len_std':            df_hydrate_fringes['len'].std(),
-            #'len_median':         df_hydrate_fringes['len'].median(),
-            'measure_percent':    0 if z <= 1 else len_df_hf/z,
-            'polar_raw':          polar_raw,
-            'polar':              polar,
-            'unploar':            unploar,
-            'show_image':         show_image,
-            'z':                  z }
+    return {
+        'id':					k,
+        'df_hydrate_fringes':	df_hydrate_fringes,
+        'measurements':			len_df_hf,
+        #'len_min':				df_hydrate_fringes['len'].min(),
+        #'len_max':				df_hydrate_fringes['len'].max(),
+        'len_mean':				df_hydrate_fringes['len'].mean(),
+        'len_std':				df_hydrate_fringes['len'].std(),
+        #'len_median':			df_hydrate_fringes['len'].median(),
+        'measure_percent':		0 if z <= 1 else len_df_hf/z,
+        'polar_raw':			polar_raw,
+        'polar':				polar,
+        'unpolar':				unpolar,
+        'show_image':			show_image,
+        'z':					z
+    }
+
+def get_r_deviation( X, Y, r_max, min_val, max_val = -1 ):
+    if max_val < 0: max_val = X.max()+1
+
+    S_sum = 0
+    S_sum_l = 0
+    S_sum_r = 0
+    percentage = np.zeros(len(X))
+    r_max_pos = -1
+    for i in range(len(X)):
+        if X[i] <= max_val: # maybe this is not ideal - maybe try the full array
+            if X[i] >= min_val:
+                S_sum += Y[i]
+                if X[i] > r_max:
+                    if r_max_pos <0: r_max_pos = i
+                    S_sum_r += Y[i] #S_sum_l += S[j]
+                    percentage[i] = S_sum_r
+
+    for i in reversed(range(len(X))):
+        if X[i] <= max_val: # maybe this is not ideal - maybe try the full array
+            if X[i] <= r_max:
+                S_sum_l += Y[i]
+                percentage[i] = S_sum_l
+
+    return percentage / S_sum, r_max_pos
 
 def plot_2d_result(particle_df, hydrate_rim_df, specimen, label, age, scale, unit, min_val, width_f = 1/8, smooting_f = 1, max_dia = 9, max_dia_rim = 7):
 	from matplotlib.gridspec import GridSpec
-	fig, ax = plt.subplots( 2, 3 )
+	ig, ax = plt.subplots( 2, 3 )
 	plt.close()
 
 	grain_diameters = np.linspace(0,max_dia, num=int(max_dia/width_f))
@@ -375,6 +411,11 @@ def plot_2d_result(particle_df, hydrate_rim_df, specimen, label, age, scale, uni
 			f_max = f
 			x_max_pos = k
 
+	r_max = x_data[x_max_pos]
+	Xc = X[0][:-1]
+	percentage, r_max_pos = get_r_deviation( Xc, S, r_max, min_val)
+
+	# plot functions
 	fig = plt.figure()
 	gs = GridSpec(nrows=2, ncols=3, width_ratios=[1, 0.16, 0.07], height_ratios=[0.2, 1], wspace=0.025, hspace=0.025)
 
@@ -394,7 +435,6 @@ def plot_2d_result(particle_df, hydrate_rim_df, specimen, label, age, scale, uni
 	ax[0,1].axis("off")
 	ax[0,1].text(1.2, 0.3, "{}, {} d".format(label, age), horizontalalignment='center', fontsize=16)
 
-
 	ax[1,0] = fig.add_subplot(gs[1,0])
 	plot = ax[1,0].pcolormesh(Y, X, Z, vmin=0, vmax=1.0, cmap='ocean_r')
 	ax[1,0].set_ylabel( "hydrate layer thickness in µm", fontsize=12 )
@@ -403,12 +443,34 @@ def plot_2d_result(particle_df, hydrate_rim_df, specimen, label, age, scale, uni
 	ax[1,0].set_xlim([0,max_dia - .2])
 	ax[0,0].grid(visible=False, which='both', axis='x')
 
-
+	X_center = X[0][:-1]-X[0][1]/2
 	ax[1,1] = fig.add_subplot(gs[1,1])
 	ax[1,1].spines[['top','right']].set_visible(False)
-	ax[1,1].hist(X[0][:-1]-X[0][1]/2, X[0]-X[0][1]/2, weights=S, linewidth=0, orientation="horizontal", color='orange')
-	ax[1,1].plot(  fit_data/fit_data.max(), x_data, label='fit', color='r')
-	ax[1,1].hlines(y=x_data[x_max_pos], xmin=0, xmax=1, linewidth=1, color='r')
+	ax[1,1].hist( X_center, X[0]-X[0][1]/2, weights=S, linewidth=0, orientation="horizontal", color='orange')
+	ax[1,1].hlines(y=x_data[x_max_pos], xmin=0, xmax=1, linewidth=1, color='green')
+
+	#shitty, but good enough for now...
+	grenzwert_a = 1/3 # prozentwert
+	left_pos_a  = np.where(percentage[0:r_max_pos] >= grenzwert_a/2)[-1].max()
+	right_pos_a = np.where(percentage[r_max_pos:]  >= grenzwert_a/2)[0].min()+r_max_pos
+	#print( left_pos_a, right_pos_a, Xc[left_pos_a], Xc[right_pos_a], r_max-Xc[left_pos_a], Xc[right_pos_a]-r_max )
+	print( '{:.1f} % of measurements: {:.2f}+{:.2f}-{:.2f} µm / {:.2f} to {:.2f} µm'.format(grenzwert_a*100, r_max, r_max-Xc[left_pos_a], Xc[right_pos_a]-r_max, Xc[left_pos_a], Xc[right_pos_a]) )
+
+	ax[1,1].hlines( y=X_center[left_pos_a],  xmin=0, xmax=S[left_pos_a],  linewidth=1, color='yellow')
+	ax[1,1].hlines( y=X_center[right_pos_a], xmin=0, xmax=S[right_pos_a], linewidth=1, color='yellow')
+
+	grenzwert_b = 1/2 # prozentwert
+	left_pos_b  = np.where(percentage[0:r_max_pos] >= grenzwert_b/2)[-1].max()
+	right_pos_b = np.where(percentage[r_max_pos:]  >= grenzwert_b/2)[0].min()+r_max_pos
+
+	ax[1,1].hlines( y=X_center[left_pos_b],  xmin=0, xmax=S[left_pos_b],  linewidth=1, color='r' )
+	ax[1,1].hlines( y=X_center[right_pos_b], xmin=0, xmax=S[right_pos_b], linewidth=1, color='r' )
+	print( '{:.1f} % of measurements: {:.2f}+{:.2f}-{:.2f} µm / {:.2f} to {:.2f} µm'.format(grenzwert_b*100, r_max, r_max-Xc[left_pos_b], Xc[right_pos_b]-r_max, Xc[left_pos_b], Xc[right_pos_b]) )
+
+	ax[1,1].plot( fit_data/fit_data.max(), x_data, label='fit', color='r')
+
+	#ax[1,1].plot( percentage, Xc )
+
 	#ax[1,1].plot(S, X[0])
 	ax[1,1].set_xlabel( "linear\nfrequency" )
 	ax[1,1].set_ylim([0,max_dia_rim - .2])
@@ -426,10 +488,11 @@ def plot_2d_result(particle_df, hydrate_rim_df, specimen, label, age, scale, uni
 	plt.savefig( "{} {} 2d rim histogram.pdf".format(specimen, age) )
 	plt.show()
 
-	return x_data[x_max_pos]
+	return r_max, grenzwert_a, X_center[left_pos_a], X_center[right_pos_a], grenzwert_b, X_center[left_pos_b], X_center[right_pos_b] #shitty, but good enough for now...
 
 class Image_Processor:
     label           = 'unnamed'
+    phases          = ['CH', 'CSH', 'CSH-o']
     scaling         = { 'x' : 1, 'y' : 1, 'unit' : 'nm' }
     f_scaling       = 1000 # usually the files are given in nm - with this factor the base unit is changes e.g. to µm (1000)
     unit            = 'µm'
@@ -465,44 +528,46 @@ class Image_Processor:
     multiplied_img  = np.empty((w, h, 3), np.uint8)
 
     # result lists / dictionaries
-    selected_contours         = []
-    h_fringe_len              = {}
+    selected_contours		 = []
+    h_fringe_len			  = {}
 
     display_max_result_images = 5
-    save_images               = False
-    show_images               = False
+    save_images			   = False
+    show_images			   = False
+    is_thresholded			= False
+    denoise				   = True
+    do_segmentation		   = True
+    make_result_image		 = True
 
     df_hydrate_fringes  = pd.DataFrame([], columns = ['particle', 'len', 'adjacent', 'len_px', 'boundary'])
-    df_particles_columns = ['contour', 'cx', 'cy', 'area', 'perimeter', 'circularity', 'len_mean', 'len_std', 'z', 'measurements', 'measure_percent'] # , 'len_min', 'len_max', 'len_median'
-    df_particles        = pd.DataFrame([], columns = df_particles_columns)
+    df_particles_columns = ['contour', 'cx', 'cy', 'area', 'perimeter', 'circularity', 'len_mean', 'len_std', 'z', 'measurements', 'measure_percent', 'unpolar'] # , 'len_min', 'len_max', 'len_median'
+    df_particles		= pd.DataFrame([], columns = df_particles_columns)
+
+    settings = {
+        'specimen'			: 'unnamed',
+        'label'				: 'unnamed',
+        'age'				: 0,     # in days
+        't_pores'			: 100,
+        't_clinker'			: 200,
+        'min_grain_dia'		: 0.35,  # diameter in µm #int(   1000/2.9) #0.4µm²
+        'max_grain_dia'		: 3.00,  # diameter in µm #int(  50000/2.9) #
+        'min_circularity'	: 0.60,  # 0.0-1.0, where 1.0 is a perfect circle
+        'enhance_hist'		: True,
+        'denoise'			: True,
+        'denoising_algorithm' : 'nlm',
+        'min_rim'			 : 0.5,   # ignore measurements below this value in µm
+        'max_rim'			 : 7.0,   # ignore measurements above this value in µm
+        'reduce'			  : False,
+        'segmentation_folder' : '',
+    }
 
     def __init__(self,
-                 file_path,                      # full path to dataset eg. 'C:\data\dataset.tif'
-                 settings = {
-                    'label'               : 'unnamed',
-                    'age'                 : '0 d',
-                    't_pores'             : 100,
-                    't_clinker'           : 200,
-                    'min_grain_dia'       : 0.35,  # diameter in µm #int(   1000/2.9) #0.4µm²
-                    'max_grain_dia'       : 3.00,  # diameter in µm #int(  50000/2.9) #
-                    'min_circularity'     : 0.60,  # 0.0-1.0, where 1.0 is a perfect circle
-                    'enhance_hist'        : True,
-                    'denoise'             : True,
-                    'denoising_algorithm' : 'nlm',
-                    'min_rim'             : 0.5,   # ignore measurements below this value in µm
-                    'max_rim'             : 7.0,   # ignore measurements above this value in µm
-                    'reduce'              : False
-                 },
-                 scaling = None,
-                 show_images = False,
-                 save_images = False
+                 file_path, # full path to dataset eg. 'C:\data\dataset.tif'
+                 settings = None, scaling = None, show_images = False, save_images = False
                 ):
 
         if os.path.isfile(file_path):
-            self.settings  = settings
-            self.label     = settings['label']
-            self.min_rim   = settings['min_rim']
-            self.max_rim   = settings['max_rim']
+            self.apply_settings(settings)
             self.file_path = file_path
             self.file_dir  = os.path.dirname(  file_path )
             self.file_name = os.path.basename( file_path ).split('.', 1)[0]
@@ -514,17 +579,39 @@ class Image_Processor:
                     os.makedirs( self.result_image_dir )
             self.show_images = show_images
 
+            # check if pre-made segmentation results exists
+            if self.settings['segmentation_folder'] != '':
+                self.do_segmentation = False
+                for phase in self.phases:
+                    path = os.sep + self.settings['segmentation_folder'] + os.sep + phase + '.tif'
+                    if not os.path.isfile( self.file_dir + path ):
+                        print( 'Warning! Segmentation result ".{}" not found!'.format(path) )
+                        if phase != self.phases[-1]:# optional
+                            self.do_segmentation = True
+                if not self.do_segmentation:
+                    print( 'Found existing segmentation results. Omitting denoising and thresholding steps.' )
+                    self.denoise = False
+
+            # load the dataset
             self.load_image( file_path, scaling )
             if show_images or save_images: self.plot_raw_image( save=save_images )
 
             self.save_metadata()
-
             self.get_cropped_example()
         else:
             raise Exception( '{} does not exist!'.format(file_path) )
 
-    def get_scaling(self, file_path, scaling = None):
+    def apply_settings( self, settings ):
+        if not settings is None:
+            for key in self.settings:
+                if key in settings: self.settings[key] = settings[key]
+        self.label     = self.settings['label']
+        self.min_rim   = self.settings['min_rim']
+        self.max_rim   = self.settings['max_rim']
+        self.denoise   = self.settings['denoise']
+        self.phases.insert( 0, self.settings['specimen'] )
 
+    def get_scaling(self, file_path, scaling = None):
         if scaling == None:
             # autodetect the scaling (works for FEI/thermofischer SEM images or scaled images from ImageJ/Fiji)
             UC = es.unit()
@@ -545,16 +632,46 @@ class Image_Processor:
 
         self.get_scaling(file_path, scaling)
 
-        print( "Loaded an image with {}x{} px".format(self.w, self.h))
+        print( "Loaded an image with {} x {} px".format(self.w, self.h))
         print( " - scaling: {:.4f} {} / px".format(self.scaling['x'], self.unit))
         print( " - size:    {:.1f} x {:.1f} {} = {:.2f} mm²".format(self.w*self.scaling['x'], self.w*self.scaling['y'], self.unit, self.w*self.scaling['x']*self.w*self.scaling['y']/1000/1000))
+
+        if not self.do_segmentation:
+            print('loading phase masks')
+            loaded_phases = []
+            for phase in self.phases:
+                path = self.file_dir + os.sep + self.settings['segmentation_folder'] + os.sep + phase + '.tif'
+                if os.path.isfile(path):
+                    loaded_phases.append( cv2.imread( path, cv2.IMREAD_GRAYSCALE ) )
+
+            self.mask_pores	= np.zeros((self.h, self.w), np.uint8)
+            self.mask_hydrates = np.add(loaded_phases[1], loaded_phases[2])
+            if len(loaded_phases) == 4:
+                self.mask_hydrates = np.add(self.mask_hydrates, loaded_phases[3]) # in case CSH-o exists
+            self.mask_clinker  = loaded_phases[0]
+
+            self.mask_pores.fill( 255 )
+            self.mask_pores	= np.subtract(self.mask_pores, np.add(self.mask_hydrates, self.mask_clinker))
+
+            fig, ax = plt.subplots( 1, 3, figsize = ( 18, 5 ) )
+            fig.suptitle( self.label, fontsize = 16 )
+
+            i = 0
+            ax[i].imshow( self.mask_clinker, cmap='gray' )
+            i += 1
+            ax[i].imshow( self.mask_hydrates,cmap='gray' )
+            i += 1
+            ax[i].imshow( self.mask_pores,	 cmap='gray' )
+
+            plt.show()
+
 
         # if the resolution is below 0.05 µm rescale the image
         if self.settings['reduce'] and (self.scaling['x'] * 2) < 0.1:
             f = math.floor( 0.1 / self.scaling['x'] )
             self.w = int(self.w/f)
             self.h = int(self.h/f)
-            self.img = cv2.resize(self.img, (self.w, self.h), interpolation= cv2.INTER_LINEAR)
+            self.img = cv2.resize(self.img, (self.w, self.h), interpolation = cv2.INTER_LINEAR)
             self.scaling['x'] = self.scaling['x'] * f
             self.scaling['y'] = self.scaling['y'] * f
             print(" - resized image to {}x{} px (f: 1/{}, scaling: {:.4f} {} / px)".format( self.w, self.h, f, self.scaling['x'], self.unit ))
@@ -564,7 +681,8 @@ class Image_Processor:
         self.min_grain_area = int( math.pi * ((self.min_grain_dia/2)**2) )
         self.max_grain_area = int( math.pi * ((self.max_grain_dia/2)**2) )
 
-        print( "\n - Selected color thresholds: 0-{:d} for pores {:d}-{:d} for hydrates and {:d}-255 for alite".format(self.settings['t_pores'], self.settings['t_pores']+1, self.settings['t_clinker']-1, self.settings['t_clinker'])  )
+        if self.do_segmentation:
+            print( "\n - Selected color thresholds: 0-{:d} for pores {:d}-{:d} for hydrates and {:d}-255 for alite".format(self.settings['t_pores'], self.settings['t_pores']+1, self.settings['t_clinker']-1, self.settings['t_clinker'])  )
 
         print( " - Analyzing gains with areas from {:.3f} {}² up to {:.2f} {}²".format(self.min_grain_area*(self.scaling['x']**2), self.unit, self.max_grain_area*(self.scaling['x']**2), self.unit) )
 
@@ -603,9 +721,9 @@ class Image_Processor:
 
     def filter_image(self):
         alg = self.settings['denoising_algorithm']
-        if self.settings['enhance_hist'] or self.settings['denoise']:
+        if self.settings['enhance_hist'] or self.denoise:
             filter_n = 'enh_' if self.settings['enhance_hist'] else ''
-            if self.settings['denoise']: filter_n = filter_n + alg
+            if self.denoise: filter_n = filter_n + alg
             filtered_file_path = '{}/{}_{}.tif'.format( self.file_dir, self.file_name, filter_n )
 
         if os.path.exists(filtered_file_path):
@@ -615,7 +733,7 @@ class Image_Processor:
             # preprocess the image
             self.filtered = exposure.adjust_log( self.img ) if self.settings['enhance_hist'] else self.img
 
-            if self.settings['denoise']:
+            if self.denoise:
                 if alg == 'nlm':
                     print( "Denoising image using Non Local Means" )
                     self.filtered = denoiseNLMCV2( self.filtered, h=18 )
@@ -623,47 +741,57 @@ class Image_Processor:
                     print( "Denoising image using Bilateral filter" )
                     self.filtered = denoiseBilateralCV2( self.filtered, d=15 )
 
-            if self.settings['enhance_hist'] or self.settings['denoise']:
+            if self.settings['enhance_hist'] or self.denoise:
                 print( 'saving to', filtered_file_path )
                 cv2.imwrite( filtered_file_path, self.filtered )
 
-        if self.settings['enhance_hist'] or self.settings['denoise']:
+        if self.settings['enhance_hist'] or self.denoise:
             self.plot_filtered_image(self.save_images)
 
     def set_thresholds(self):
-
+        self.is_thresholded = True
         # get pores / alite masks
-        _, thresh_pores = cv2.threshold(self.filtered, self.settings["t_pores"], 255, cv2.THRESH_BINARY_INV)
-        _, thresh_clinker = cv2.threshold(self.filtered, self.settings["t_clinker"], 255, cv2.THRESH_BINARY)
+        _, self.mask_pores = cv2.threshold(self.filtered, self.settings["t_pores"], 255, cv2.THRESH_BINARY_INV)
+        _, self.mask_clinker = cv2.threshold(self.filtered, self.settings["t_clinker"], 255, cv2.THRESH_BINARY)
 
         # fill holes in alite mask
+        self.find_clinker_grains(  )
+
+        # hydrates
+        self.mask_hydrates = ((self.mask_pores + self.mask_clinker)-255)*255
+
+        self.set_masks( )
+
+    def find_clinker_grains( self ):
+        # fill holes in alite mask
         bench_time = time.time()
-        self.unfiltered_contours, _ = cv2.findContours(thresh_clinker, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        thresh_clinker = np.zeros((thresh_pores.shape[0], thresh_pores.shape[1]), np.uint8)
+        self.unfiltered_contours, _ = cv2.findContours(self.mask_clinker, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        self.mask_clinker = np.zeros((self.mask_clinker.shape[0], self.mask_clinker.shape[1]), np.uint8)
 
         # draw the contours on an empty canvas and fill the contours
         contour_cnt = len(self.unfiltered_contours)
         for i in range(contour_cnt):
             if i%int(contour_cnt/20) == 0 and i > 0: print( '{:3.0f}% done'.format( i/len(self.unfiltered_contours)*100 ))
-            thresh_clinker = cv2.drawContours(thresh_clinker, self.unfiltered_contours, i, (255), -1)
-        self.unfiltered_contours, self.unfiltered_hierarchy = cv2.findContours(thresh_clinker, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            self.mask_clinker = cv2.drawContours(self.mask_clinker, self.unfiltered_contours, i, (255), -1)
+        self.unfiltered_contours, self.unfiltered_hierarchy = cv2.findContours(self.mask_clinker, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         print( "fill holes took {:.0f} s".format(time.time() - bench_time) )
 
-        # hydrates
-        thresh_hydrates = ((thresh_pores+thresh_clinker)-255)*255
 
+    # white (255) = true
+    # black   (0) = false
+    def set_masks( self ):
         # combine to 3 phase rgb image
-        self.thresh_rgb = np.ones((thresh_pores.shape[0],thresh_pores.shape[1],3), np.uint8)
+        self.thresh_rgb = np.ones((self.mask_pores.shape[0], self.mask_pores.shape[1], 3), np.uint8)
 
         #define colors for the phase map (maximum 3)
-        self.thresh_rgb[:,:,0] = thresh_pores
-        self.thresh_rgb[:,:,1] = thresh_hydrates
-        self.thresh_rgb[:,:,2] = thresh_clinker
+        self.thresh_rgb[:,:,0] = self.mask_pores
+        self.thresh_rgb[:,:,1] = self.mask_hydrates
+        self.thresh_rgb[:,:,2] = self.mask_clinker
 
         self.multiplied_img = cv2.addWeighted( cv2.cvtColor(self.filtered, cv2.COLOR_GRAY2RGB), 0.85, self.thresh_rgb, 0.15, 0.0)
 
         # pores are completely black
-        self.removed_pores = cv2.bitwise_and(self.filtered, self.filtered, mask=cv2.bitwise_not(thresh_pores))
+        self.removed_pores = cv2.bitwise_and(self.filtered, self.filtered, mask=cv2.bitwise_not(self.mask_pores))
 
         t = self.thresh_rgb.astype(bool)
         f_percent = 100/(self.w * self.h)
@@ -685,7 +813,6 @@ class Image_Processor:
             t_rp_file_path    = self.file_dir + os.sep + self.file_name + "_t_rp.tif"
             print( 'saving to', t_rp_file_path )
             cv2.imwrite( t_rp_file_path, self.removed_pores )
-
 
     def filter_contours(self, verbose = True):
         self.img_alite_contours = np.zeros((self.w,self.h,3), np.uint8)
@@ -724,66 +851,65 @@ class Image_Processor:
         self.df_particles['area']      = self.df_particles.area.apply( lambda x: x * self.scaling['x']**2 )
         self.df_particles['perimeter'] = self.df_particles.perimeter.apply( lambda x: x * self.scaling['x'] )
 
-    def get_particle_crops(self, contour):
+    def get_particle_crops_coords(self, contour):
         # simplify var names
         cx = contour[2]	    # x coordinate of the center point in the raw image
         cy = contour[1]	    # y coordinate of the center point in the raw image
         r = math.sqrt(contour[3]/math.pi)  # correct for the mean particle radius
-        #u  = radius if radius >0 else contour[4] # rounded perimeter length
         u  = int( self.max_rim / self.scaling['x'] + r)
+
+        return cx-u, cx+u, cy-u, cy+u, u
+
+    def get_particle_crops(self, contour):
+        x0, x1, y0, y1, _ = self.get_particle_crops_coords( contour )
 
         # crop the image to the image section containing the particle
         # using the perimeter length u as window size
-        #particle_raw = self.removed_pores[ cx-u : cx+u, cy-u : cy+u ]
-        particle_raw = self.img       [ cx-u : cx+u, cy-u : cy+u ]
-        particle_rgb = self.thresh_rgb[ cx-u : cx+u, cy-u : cy+u ]
+        particle_raw = self.img[ x0 : x1, y0 : y1 ]
+        particle_rgb = self.thresh_rgb[ x0 : x1, y0 : y1 ]
 
         return particle_raw, particle_rgb
 
     def merge_particle_result( self, r ):
-        k                         = r['id']
-        show_image                = r['show_image']
+        k			= r['id']
+        show_image	= r['show_image']
 
-        df_hf                     = r['df_hydrate_fringes']
-        ## apply scaling
-        #df_hf                     = df_hf.loc[df_hf['boundary'] == 0].reset_index()
-        #df_hf['len']              = df_hf['len_px'].apply( lambda x: x*self.scaling['x'] )
+        df_hf		= r['df_hydrate_fringes']
 
         self.df_hydrate_fringes   = pd.concat([ self.df_hydrate_fringes, df_hf ], ignore_index=True)
 
         particle_cnt = len(self.df_particles)
         if k % math.ceil(particle_cnt/20) == 0 and k > 0:
             elapsed_time = time.time() - self.bench_time # in s
-            #time_per_particle = elapsed_time/k
-            estimated_time = elapsed_time/k*particle_cnt # in s #len(self.selected_contours)
+            estimated_time = elapsed_time/k*particle_cnt # in s
             print( "{:3.0f}% done, estimated time: {:3.1f} min, remaining time: {:3.1f} min".format(k/particle_cnt*100, estimated_time/60, (estimated_time-elapsed_time)/60 ))
             self.show_processing_output = False
             show_image = False
 
         row = self.df_particles.iloc[k].copy()
-        #self.df_particles.loc[k, 'len_min']         = r['len_min'] #df_hf['len'].min()
-        #self.df_particles.loc[k, 'len_max']         = r['len_max'] #df_hf['len'].max()
-        row['len_mean']        = r['len_mean'] #df_hf['len'].mean()
-        row['len_std']         = r['len_std'] #df_hf['len'].std()
-        #row['len_median']      = r['len_median'] #df_hf['len'].median()
-        row['measurements']    = r['measurements'] #len_df_hf             # usable measurements
-        row['z']               = r['z']                 # total measurements
-        row['measure_percent'] = r['measure_percent'] #0 if r['z'] <= 1 else len_df_hf/r['z']
+        row['len_mean']			= r['len_mean']
+        row['len_std']			= r['len_std']
+        row['measurements']		= r['measurements']		# usable measurements
+        row['z']				= r['z']				# total measurements
+        row['measure_percent']	= r['measure_percent']	# 0 if r['z'] <= 1 else len_df_hf/r['z']
+
+        # append result image of the measurement to result table if required.
+        if self.make_result_image and self.df_particles.dtypes['unpolar'] != 'object':
+            self.df_particles = self.df_particles.astype({'unpolar':'object'})
+        row['unpolar']		 = r['unpolar'] if self.make_result_image else None
         self.df_particles.iloc[k] = row
         # debugging output
         if self.save_images or show_image or self.show_processing_output:
             is_border_particle = (len(r['polar']) < 1)
             has_measurements   = r['measurements'] > 0
 
-            result_file_name = self.file_dir + os.sep + self.file_name + "_p{}".format(k)
-            if has_measurements: df_hf.to_feather( result_file_name+'.feather' )
+            #result_file_name = self.file_dir + os.sep + self.file_name + "_p{}".format(k)
+            #if has_measurements: df_hf.to_feather( result_file_name+'.feather' )
 
             title = "particle #{:4d} - {:4d} measurements, mean rim width: {:4.1f} ± {:4.1f} {}".format(
                 k,
                 r['measurements'],
-                #r['len_min'],    r['len_max'], self.unit,
                 r['len_mean'],   df_hf['len'].std(), self.unit,
-                #r['len_median'], self.unit
             ) if has_measurements else 'particle #{:4d} -   no measurements!'.format( k )
 
             if (self.save_images or show_image) and not is_border_particle:
@@ -795,7 +921,7 @@ class Image_Processor:
                     particle_rgb,
                     r['polar_raw'],
                     r['polar'],
-                    r['unploar']
+                    r['unpolar']
                 )
 
                 # avoid cluttered jupyter file
@@ -829,7 +955,7 @@ class Image_Processor:
             if not (processCount > 0 and processCount < self.processCount): processCount = self.processCount
             if self.processCount < 2: multithreading = False
             if multithreading:
-                print( 'Using {} processes to measure the hydrate fringes.'.format(processCount) )
+                print( 'Using {} processes to measure the hydrate fringes of {} particles.'.format(processCount, len(self.selected_contours)) )
                 pool = multiprocessing.Pool( processCount )
 
             min_dim  = int( self.max_rim / self.scaling['x'] )*2
@@ -860,10 +986,36 @@ class Image_Processor:
                 pool.close() # close the process pool
                 pool.join()  # wait for all tasks to finish
 
+            self.result_image	= np.zeros((self.w,self.h,3), np.uint8)
+            for k in range(len(self.selected_contours)):
+                if k in self.df_particles.index: # only particles which were usable were stored
+                    unpolar = self.df_particles.iloc[k]['unpolar']
+                    # if unpolar == 0, no measurement was made and sometimes an empty [] is stored.
+                    # these cases have to be ignored.
+                    if type( unpolar ) != int and len(unpolar) > 1:
+                        x0, x1, y0, y1, u = self.get_particle_crops_coords( self.selected_contours[k] )
+
+                        # the unpolar image has corners, which are filled with random data from memory.
+                        # ince I did not find the correct flag, to fill these corners with black, it is done here.
+                        mask = np.zeros(unpolar.shape[:2], dtype="uint8") # initialize mask
+                        cv2.circle(mask, (u, u), u-1, 255, -1) # draw circle
+                        unpolar[mask == 0] = (0, 0, 0) # remove corners / mask value 0
+
+
+                        subsection = self.result_image[x0 : x1, y0 : y1] # load the old content of the result canvas / "background"
+                        alpha_mask = unpolar[::1]/255 # use green(?) channel as mask, to avoid overwriting other results from particles
+
+                        # plot the image with the applied alpha mask to the result canvas.
+                        if subsection.shape == unpolar.shape:
+                        	self.result_image[x0 : x1, y0 : y1] = subsection * (1 - alpha_mask) +  unpolar * alpha_mask
+
             if ignored_particles > 0: print( 'ignored {} of {} particles, since they were too close to the border'.format( ignored_particles, len(self.selected_contours) ) )
+            # save datasets for later statistical review
             self.df_hydrate_fringes.to_feather( dataset_file_name1+'.feather' )
             c = self.df_particles.columns.to_list()
-            c.pop(0)
+            c.pop(0)  # remove 'contour' - not suitable for feather
+            c.pop(-2) # remove 'unploar' - not suitable for feather
+            #print(c)
             self.df_particles[c].to_feather( dataset_file_name2+'.feather' )
 
 
@@ -920,6 +1072,7 @@ class Image_Processor:
                         'b':       FCP.params[1],
                         'c':       FCP.params[2],
                         'd':       FCP.params[3],
+                        'par_err': FCP.perr,
                         'x_data':  x_data,
                         'f_data':  fit_data,
                         'max_rim': max_rim,
@@ -1124,16 +1277,16 @@ class Image_Processor:
 
         plt.show()
 
-    def plot_particle_measurement( self, title, result_file_name, particle_raw, particle_rgb, polar_raw, polar, unploar ):
+    def plot_particle_measurement( self, title, result_file_name, particle_raw, particle_rgb, polar_raw, polar, unpolar ):
         fig, ax = plt.subplots(1, 5, figsize=( 25, 5 ))
         fig.suptitle( title, fontsize=16 )
 
         # perimeter length of the particle
         u  = int( particle_raw.shape[0]/2 )
 
-        mask = np.zeros(unploar.shape[:2], dtype="uint8")
+        mask = np.zeros(unpolar.shape[:2], dtype="uint8")
         cv2.circle(mask, (u, u), u-1, 255, -1)
-        unploar[mask == 0] = (255, 255, 255)
+        unpolar[mask == 0] = (255, 255, 255)
 
         rim = math.ceil(self.max_rim)
         r_labels = np.array( range(rim+1 ) )
@@ -1184,14 +1337,14 @@ class Image_Processor:
         ax[i].set_ylim([0,polar.shape[0]-1])
 
         i += 1
-        ax[i].imshow( unploar )
+        ax[i].imshow( unpolar )
         #ax[i].set_title(  "extracted grain with hydrate fringe" )
         ax[i].set_xlabel( "x in {}".format( self.unit ) )
         ax[i].set_ylabel( "y in {}".format( self.unit ) )
         ax[i].set_xticks( x_ticks_u, x_labels_u )
         ax[i].set_yticks( x_ticks_u, x_labels_u )
-        ax[i].set_xlim([0,unploar.shape[1]-1])
-        ax[i].set_ylim([unploar.shape[0]-1,0])
+        ax[i].set_xlim([0,unpolar.shape[1]-1])
+        ax[i].set_ylim([unpolar.shape[0]-1,0])
         ax[i].spines['top'].set_visible(False)
         ax[i].spines['right'].set_visible(False)
         ax[i].spines['bottom'].set_visible(False)
@@ -1199,104 +1352,43 @@ class Image_Processor:
 
         if self.save_images: plt.savefig( self.result_image_dir + os.sep + result_file_name + ".svg" )
 
-    def plot_hydrate_rim_thicknesses( self, min_rim=None, max_rim=None, y_limit=[0,5] ):
-        if min_rim == None: min_rim = self.min_rim
-        if max_rim == None: max_rim = self.max_rim
-
-        sns.set_style("whitegrid")
-
-        max_measurement_cnt = 0
-        max_rims = []
-        for i,f in enumerate(self.fits):
-            if max_measurement_cnt < f['measurement_cnt']: max_measurement_cnt = f['measurement_cnt']
-            max_rims.append(f['max_rim'])
-
-        df = self.df_hydrate_fringes[ ( self.df_hydrate_fringes.len < max_rim ) ]
+    def show_processed_particles( self, save=False ):
+        df = self.df_hydrate_fringes[ ( self.df_hydrate_fringes.len < self.max_rim ) ]
         df = pd.merge(df, self.df_particles[['area', 'diameter', 'perimeter', 'circularity', 'measure_percent']], left_on='particle', right_index=True)
-        f_data_l  = []
-        for j in range( int(self.settings['max_grain_dia'])):
-            df_filtered = df[(df.diameter < j+1) & (df.diameter > j) & (df.measure_percent > 0.25) & (df.len > min_rim)]
-            if len(df_filtered) > 0:
-                f_data_l.append(df_filtered.len.to_list())
+        df = df.loc[( df.circularity > 0.3 )]
+        df_k = pd.unique(df.particle)
 
-        for j,f in enumerate(self.fits):
-            self.fits[j]['max_rim'] = max(enumerate(f['f_data']),key=lambda x: x[1])[0]
+        img_alite_contours = self.result_image.copy()
+        for i in range(len(self.selected_contours)):
+            if not i in df_k:
+                cv2.drawContours(img_alite_contours, [self.selected_contours[i][0]], 0, (255,150,150), cv2.FILLED, cv2.LINE_8)
 
-        ### 3D-Plot of fit functions
-        fig = plt.figure(figsize=( 5, 5.5 ))
-        fig.suptitle( "Calculated hydrate rim of\n{}".format(self.label), fontsize=16 )
-        ax = fig.add_subplot(projection='3d')
-
-        for i,f in enumerate(self.fits):
-            # Plot the bar graph given by xs and ys on the plane y=k with 80% opacity.
-            ax.plot( f['x_data'], f['f_data'], zs=f['dia_max'], zdir='y', alpha=f['measurement_cnt']/max_measurement_cnt, color = 'blue')#, color = colors[i])
-
-        ax.set_xlabel( "hydrate rim thickness in {}".format( self.unit ) )
-        ax.set_ylabel( "grain diameter in {}".format( self.unit ) )
-        ax.set_zlabel( "frequency" )
-        ax.set_xlim([0, max_rim])
-
-        plt.tight_layout()
-        plt.show()
-        plt.close()
-
-
-        ### 2D plots of fit functions and maxima of hydrate fringe thickness
-        fig, ax = plt.subplots(1, 5, figsize=( 30, 6 ))
-        fig.suptitle( "Calculated hydrate rim of {}".format(self.label), fontsize=16 )
+        overblended_result = cv2.addWeighted( cv2.cvtColor(self.removed_pores, cv2.COLOR_GRAY2RGB), 0.4, img_alite_contours, 0.6, 0.0)
+        if save:
+            file_path = '{}/{}_processed-particles.tif'.format( self.file_dir, self.file_name )
+            cv2.imwrite(file_path, overblended_result)
+        fig, ax = plt.subplots(1, 2, figsize=( 17, 8 ))
+        fig.suptitle( "{} particles with usable data".format(len(df_k), len(self.selected_contours)), fontsize=16 )
 
         i = 0
-        for j,f in enumerate(self.fits):
-            self.fits[j]['max_rim'] = max(enumerate(f['f_data']),key=lambda x: x[1])[0]
-            ax[i].plot( f['x_data'], f['f_data'], alpha=f['measurement_cnt']/max_measurement_cnt, color = 'blue')
-
-        ax[i].set_xlabel( "hydrate rim thickness in {}".format( self.unit ) )
-        ax[i].set_ylabel( "frequency" )
-        ax[i].set_xlim([0, max_rim/2])
-
-        i += 1
-        ax[i].plot( range(1, len(self.fits)+1), max_rims, '-x', linewidth=1 )
-        ax[i].set_xlabel( "grain diameter in {}".format( self.unit ) )
-        ax[i].set_ylabel( "hydrate rim thickness in {}".format( self.unit ) )
-        ax[i].set_ylim(y_limit)
+        ax[i].imshow( overblended_result )
+        ax[i].set_title(  "filtered image with selected particles" )
+        ax[i].set_xlabel( "x in {}".format( self.unit ) )
+        ax[i].set_ylabel( "y in {}".format( self.unit ) )
+        tick_pos, tick_labels = self.get_image_axis_labels( ax[i] )
+        ax[i].set_xticks(tick_pos, tick_labels )
+        ax[i].set_yticks(tick_pos, tick_labels )
+        ax[i].set_xlim([0,self.h-1])
+        ax[i].set_ylim([self.w-1,0])
 
         i += 1
-        ax[i].plot( range(1, len(self.fits)+1), max_rims, '-x', linewidth=1 )
-        ax[i].boxplot(f_data_l,
-                    #positions=[2, 4, 6],
-                    widths=.5,
-                    patch_artist=True,
-                    #usermedians=max_rims,
-                    showmeans=False,
-                    showfliers=False,
-                    meanline=False,
-                    #medianprops={"color": "white", "linewidth": 0.5},
-                    #boxprops={"facecolor": "C0", "edgecolor": "white",
-                    #          "linewidth": 0.5},
-                    #whiskerprops={"color": "C0", "linewidth": 1.5},
-                    #capprops={"color": "C0", "linewidth": 1.5}
-                    )
-        ax[i].set_xlabel( "grain diameter in {}".format( self.unit ) )
-        ax[i].set_ylabel( "hydrate rim thickness in {}".format( self.unit ) )
-        ax[i].set_ylim(y_limit)
-
-        i += 1
-        sns.violinplot(data=f_data_l, scale="count",inner=None, linewidth=0.1, cut=0, ax=ax[i] )
-
-        ax[i].plot( range(0, len(self.fits)), max_rims, '-x', linewidth=1, color='black' )
-        ax[i].set_xlabel( "grain diameter in {}".format( self.unit ) )
-        ax[i].set_xticks( range(len(self.fits)), range(1,len(self.fits)+1) )
-        ax[i].set_ylabel( "hydrate rim thickness in {}".format( self.unit ) )
-        ax[i].set_ylim(y_limit)
-
-        i += 1
-        sns.violinplot(data=f_data_l, linewidth=0.5, cut=0, ax=ax[i])
-
-        ax[i].plot( range(len(self.fits)), max_rims, '-x', linewidth=1, color='black' )
-        ax[i].set_xlabel( "grain diameter in {}".format( self.unit ) )
-        ax[i].set_xticks( range(len(self.fits)), range(1,len(self.fits)+1) )
-        ax[i].set_ylabel( "hydrate rim thickness in {}".format( self.unit ) )
-        ax[i].set_ylim(y_limit)
+        ax[i].imshow( img_alite_contours ) # img_alite_used_contours )
+        ax[i].set_title(  "selected particles" )
+        ax[i].set_xlabel( "x in {}".format( self.unit ) )
+        ax[i].set_xticks(tick_pos, tick_labels )
+        ax[i].set_yticks( [], [] )
+        ax[i].set_xlim([0,self.h-1])
+        ax[i].set_ylim([self.w-1,0])
 
         plt.show()
 

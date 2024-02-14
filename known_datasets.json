@@ -44,7 +44,7 @@
 			"name": "C3S 1d.tif",
 			"t_pores": 123,
 			"t_clinker": 190,
-			"min_rim": 0.3
+			"min_rim": 0.35
 		  }
 		],
 		"7": [
@@ -64,15 +64,21 @@
 			"name": "C3S 7d_2.tif",
 			"t_pores": 99,
 			"t_clinker": 190,
-			"min_rim": 0.4
+			"min_rim": 0.5
 		  }
 		],
 		"14": [
 		  {
 			"name": "C3S 14d.tif",
 			"t_pores": 75,
-			"t_clinker": 168,
-			"min_rim": 1
+			"t_clinker": 193,
+			"min_rim": 0.75
+		  },
+		  {
+			"name": "C3S 14d_half-resolution.tif",
+			"t_pores": 75,
+			"t_clinker": 193,
+			"min_rim": 0.75
 		  }
 		],
 		"28": [
@@ -80,13 +86,13 @@
 			"name": "2019_04_15 FK C3S 28d CT.tif",
 			"t_pores": 135,
 			"t_clinker": 194,
-			"min_rim": 0.5
+			"min_rim": 1.5
 		  },
 		  {
 			"name": "C3S 28d.tif",
 			"t_pores": 87,
 			"t_clinker": 214,
-			"min_rim": 0.5
+			"min_rim": 1.5
 		  }
 		],
 		"84": [
